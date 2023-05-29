@@ -5,17 +5,17 @@ import pymongo
 import psycopg2
 import pandas as pd
 
-api_key = "AIzaSyCJEoPq855NYESIwiAT7rqFcNy7lOkRYa8"
+api_key = "AIzaSyCk6ZDLTMYa4b9HP7NstobrjalPJogJMm8"
 you_tube = build("youtube", "v3", developerKey=api_key)
 
-client = pymongo.MongoClient("mongodb://iswarya:blue12345@ac-jgnafnu-shard-00-00.btxtni3.mongodb.net:27017,"
+client = pymongo.MongoClient("mongodb://iswarya:<password>@ac-jgnafnu-shard-00-00.btxtni3.mongodb.net:27017,"
                              "ac-jgnafnu-shard-00-01.btxtni3.mongodb.net:27017,"
                              "ac-jgnafnu-shard-00-02.btxtni3.mongodb.net:27017/?ssl=true&replicaSet=atlas-1op5j8"
                              "-shard-0&authSource=admin&retryWrites=true&w=majority")
 db = client["project_youtube"]  # creating database in MongoDB
 channel_list = db.list_collection_names()  # Gives all the collections available in db
 
-conn = psycopg2.connect(host="localhost", user="postgres", password="Smile!098", port=5432, database="youtube")
+conn = psycopg2.connect(host="localhost", user="postgres", password=<password>, port=5432, database="youtube")
 cur = conn.cursor()
 
 
@@ -23,140 +23,98 @@ def channel(c_id):  # Returns scrapped channel info
     channel_data = you_tube.channels().list(
         part="snippet, contentDetails, statistics",
         id=c_id).execute()
+    print(channel_data)
 
     channel_info = dict(channel_id=c_id,
                         channel_name=channel_data["items"][0]["snippet"]["title"],
                         subscriber_count=channel_data["items"][0]["statistics"]["subscriberCount"],
                         channel_view_count=channel_data["items"][0]["statistics"]["viewCount"],
-                        channel_des=channel_data["items"][0]["snippet"]["description"])
+                        channel_des=channel_data["items"][0]["snippet"]["description"],
+                        playlist_id=channel_data['items'][0]['contentDetails']['relatedPlaylists']['uploads'])
 
     return channel_info
 
 
-def playlist(c_id):  # Returns scrapped playlist info
-    request = you_tube.playlists().list(
-        part="snippet,contentDetails",
-        channelId=c_id,
-        maxResults=25)
-    response = request.execute()
-
-    playlist_info = []
-    for i in response["items"]:
-        playlist_data = dict(channel_id=c_id, playlist_id=i["id"], playlist_title=i["snippet"]["localized"]["title"])
-        playlist_info.append(playlist_data)
-
-    return playlist_info
-
-
-def video_1():  # Returns list of video_ids in list
-    playlist_stats_1 = playlist(channel_id)
-    final_video_list = []
-    for i in playlist_stats_1:
-        one_playlist_id = i["playlist_id"]
+def get_video_stats(playlist_id):  # Returns video_ids
+    all_video_id = []
+    next_page_token = None
+    while True:
         request = you_tube.playlistItems().list(
-            part="contentDetails",
-            playlistId=one_playlist_id,
-            maxResults=50)
+            part='contentDetails',
+            playlistId=playlist_id,
+            maxResults=50,
+            pageToken=next_page_token)
         response = request.execute()
 
-        video_ids = []
-        for j in range(len(response["items"])):
-            video_ids.append(response["items"][j]["contentDetails"]["videoId"])
-
-        next_page_token = response.get("nextPageToken")
-        next_page = True
-
-        while next_page:
-            if next_page_token is None:
-                next_page = False
-            else:
-                request = you_tube.playlistItems().list(
-                    part="contentDetails",
-                    playlistId=one_playlist_id,
-                    maxResults=50,
-                    pageToken=next_page_token)
-                response = request.execute()
-
-                for k in range(len(response["items"])):
-                    video_ids.append(response["items"][k]["contentDetails"]["videoId"])
-
-                next_page_token = response.get("nextPageToken")
-
-        final_video_list.append(video_ids)
-    return final_video_list
+        for i in range(len(response['items'])):
+            all_video_id.append(response['items'][i]['contentDetails']['videoId'])
+        next_page_token = response.get('nextPageToken')
+        if next_page_token is None:
+            break
+    return all_video_id
 
 
-def video_2(c_id):  # Returns scrapped video_info
-    video_ids_list = video_1()
+def video_2(playlist_id):  # Returns scrapped video_info
+    video_ids_list = get_video_stats(playlist_id)
     video_info = []
     for sublist in video_ids_list:
-        for element in sublist:
-            exp_ele = element
-            request = you_tube.videos().list(
-                part="snippet,contentDetails,statistics",
-                id=exp_ele)
-            response = request.execute()
-            for video in response["items"]:
-                video_a = dict(channel_id=c_id, video_id=video["id"],
-                               video_title=video["snippet"]["title"],
-                               video_description=video["snippet"]["description"],
-                               video_duration=video["contentDetails"]["duration"],
-                               video_caption=video["contentDetails"].get('caption', 'false'),
-                               view_count=video["statistics"]["viewCount"],
-                               like_count=video["statistics"]["likeCount"],
-                               dislike_count=video["statistics"].get("dislikeCount", 0),
-                               favorite_count=video["statistics"].get("favoriteCount", 0),
-                               comment_count=video["statistics"].get("comment_count", 0),
-                               published_at=video["snippet"]["publishedAt"])
-                video_info.append(video_a)
+        request = you_tube.videos().list(
+            part="snippet,contentDetails,statistics",
+            id=sublist)
+        response = request.execute()
+        for video in response["items"]:
+            video_a = dict(channel_id=video['snippet']['channelId'], video_id=video["id"],
+                           video_title=video["snippet"]["title"],
+                           video_description=video["snippet"]["description"],
+                           video_duration=video["contentDetails"]["duration"],
+                           video_caption=video["contentDetails"].get('caption', 'false'),
+                           view_count=video["statistics"].get("viewCount", 0),
+                           like_count=video["statistics"].get("likeCount", 0),
+                           dislike_count=video["statistics"].get("dislikeCount", 0),
+                           favorite_count=video["statistics"].get("favoriteCount", 0),
+                           comment_count=video["statistics"].get("commentCount", 0),
+                           published_at=video["snippet"]["publishedAt"])
+            video_info.append(video_a)
     return video_info
 
 
-def video_comments():  # Returns comment info
-    video_id = video_2(channel_id)
+def video_comments(playlist_id):  # Returns comment info
+    video_ids_list = get_video_stats(playlist_id)
     comment_info = []
-    for ele in video_id:
-        exp_ele = ele["video_id"]
+    for ele in video_ids_list:
         next_page_token_comment = None
-        request = you_tube.commentThreads().list(
-            part="snippet",
-            videoId=exp_ele,
-            maxResults=50,
-            pageToken=next_page_token_comment)
-        response = request.execute()
-        #  print(response)
-        while True:
-            if response["items"]:
-                for j in response["items"]:
-                    comment_1 = dict(video_id=j["snippet"]["topLevelComment"]["snippet"]["videoId"], comment_id=j["id"],
-                                     published_at=j['snippet']['topLevelComment']['snippet']['publishedAt'],
-                                     author_display_name=j['snippet']['topLevelComment']['snippet'][
-                                         'authorDisplayName'],
-                                     display_text=j['snippet']['topLevelComment']['snippet']['textDisplay'])
-                    comment_info.append(comment_1)
-            next_page_token_comment = response.get(next_page_token_comment)
-            if next_page_token_comment is None:
-                break
+        try:
+            while True:
+                request = you_tube.commentThreads().list(
+                    part="snippet",
+                    videoId=ele,
+                    maxResults=50,
+                    pageToken=next_page_token_comment)
+                response = request.execute()
+                if response["items"]:
+                    for j in response["items"]:
+                        comment_1 = dict(video_id=j["snippet"]["topLevelComment"]["snippet"]["videoId"],
+                                         comment_id=j["id"],
+                                         published_at=j['snippet']['topLevelComment']['snippet']['publishedAt'],
+                                         author_display_name=j['snippet']['topLevelComment']['snippet'][
+                                             'authorDisplayName'],
+                                         display_text=j['snippet']['topLevelComment']['snippet']['textDisplay'])
+                        comment_info.append(comment_1)
+                next_page_token_comment = response.get(next_page_token_comment)
+                if next_page_token_comment is None:
+                    break
+        except:
+            pass
+
     return comment_info
-
-
-def youtube_stats():
-    channel_stats = channel(channel_id)
-    playlist_stats = playlist(channel_id)
-    video_1()
-    video_data = video_2(channel_id)
-    comments_data = video_comments()
-    youtube = dict(channel_info=channel_stats, playlist_info=playlist_stats, video_info=video_data,
-                   comment_info=comments_data)
-    return youtube
 
 
 st.set_page_config(layout="wide")
 with st.sidebar:
     opt = option_menu(
         menu_title="Menu",
-        options=["About", "Accumulation", "Migration", "Insights"],
-        icons=["house", "braces", "table", "question"],
+        options=["About", "Upload", "Migration", "Insights"],
+        icons=["house", "upload", "table", "check2-square"],
         menu_icon="cast",
         default_index=0
     )
@@ -183,7 +141,8 @@ if opt == "About":
              "the application empowers users with a powerful toolset to extract valuable insights and facilitate "
              "data-driven decision-making in the dynamic landscape of YouTube content creation and consumption.")
 
-elif opt == "Accumulation":
+
+elif opt == "Upload":
     st.title("YouTube Data Harvesting and Warehousing with MongoDB, SQL")
     col1, col2 = st.columns([6, 2])
     with col1:
@@ -195,14 +154,21 @@ elif opt == "Accumulation":
             st.write("You can now preview the json file or upload the file in MongoDB")
 
         if page == "Preview":
-            preview_file = youtube_stats()
+            channel_stats = channel(channel_id)
+            video_stats = video_2(channel_stats['playlist_id'])
+            comment_stats = video_comments(channel_stats['playlist_id'])
+            preview_file = dict(channel_info=channel_stats, video_info=video_stats, comment_info=comment_stats)
             st.write(preview_file)
 
         if page == "Upload":
-            preview_file = youtube_stats()
-            channel_name = preview_file["channel_info"]["channel_name"]
+            channel_stats = channel(channel_id)
+            video_stats = video_2(channel_stats['playlist_id'])
+            comment_stats = video_comments(channel_stats['playlist_id'])
+            file_upload = dict(channel_info=channel_stats, video_info=video_stats, comment_info=comment_stats)
+            channel_name = file_upload["channel_info"]["channel_name"]
             col = db[channel_name]
-            col.insert_one(preview_file)
+            col.insert_one(file_upload)
+
 
 elif opt == "Migration":
     st.title("YouTube Data Harvesting and Warehousing with MongoDB, SQL")  # Have to get the list channel_name here
@@ -210,9 +176,8 @@ elif opt == "Migration":
     id_selected = st.selectbox("Select a channel name to migrate the data from mongodb to sql",
                                options=channel_list)
     migrate = st.button("Migrate")
+
     if migrate:
-        preview_file = youtube_stats()
-        #  channel_id = preview_file["channel_info"]["channel_id"]  # Getting channel id from mongodb for migrating
         channel_dict = channel(channel_id)
         channel_df = pd.DataFrame([channel_dict])
         channel_df["subscriber_count"] = channel_df["subscriber_count"].astype("int64")
@@ -237,25 +202,7 @@ elif opt == "Migration":
             cur.execute(a, result_1)
         conn.commit()
 
-        playlist_dict = playlist(channel_id)
-        playlist_df = pd.DataFrame(playlist_dict)
-        # print(playlist_df.head)
-        cur.execute("CREATE TABLE IF NOT EXISTS PLAYLIST(CHANNEL_ID VARCHAR(50), PLAYLIST_ID VARCHAR(75) PRIMARY KEY, "
-                    "PLAYLIST_TITLE VARCHAR(100))")
-        conn.commit()
-        b = "INSERT INTO PLAYLIST(CHANNEL_ID, PLAYLIST_ID, PLAYLIST_TITLE) VALUES(%s, %s, %s)"
-        for index, value_1 in playlist_df.iterrows():
-            val_1 = value_1["playlist_id"]
-            cur.execute(f"SELECT * FROM PLAYLIST WHERE PLAYLIST_ID = '{val_1}'")
-            x = cur.fetchall()
-            if len(x) > 0:
-                cur.execute(f"DELETE FROM PLAYLIST WHERE PLAYLIST_ID = '{val_1}'")
-                conn.commit()
-            result_2 = (value_1["channel_id"], value_1["playlist_id"], value_1["playlist_title"])
-            cur.execute(b, result_2)
-        conn.commit()
-
-        video_dict = video_2(channel_id)
+        video_dict = video_2(channel_dict['playlist_id'])
         video_df = pd.DataFrame(video_dict)
         video_df["view_count"] = video_df["view_count"].astype("int64")
         video_df["like_count"] = video_df["like_count"].astype("int64")
@@ -289,7 +236,7 @@ elif opt == "Migration":
             cur.execute(c, result_3)
         conn.commit()
 
-        comments_dict = video_comments()
+        comments_dict = video_comments(channel_dict['playlist_id'])
         comments_df = pd.DataFrame(comments_dict)
         comments_df['published_at'] = pd.to_datetime(comments_df['published_at']).dt.date
         # print(comments_df.info())
@@ -311,6 +258,7 @@ elif opt == "Migration":
                 value_3["display_text"])
             cur.execute(d, result_4)
         conn.commit()
+
 
 else:
     st.title("YouTube Data Harvesting and Warehousing with MongoDB, SQL")
@@ -336,36 +284,76 @@ else:
         st.write("   ")
 
     if question_selected == "What are the names of all the videos and their corresponding channels?":
-        pass  # write sql query
+        cur.execute("SELECT CHANNEL.CHANNEL_NAME, VIDEO.VIDEO_TITLE FROM CHANNEL JOIN VIDEO ON VIDEO.CHANNEL_ID = "
+                    "CHANNEL.CHANNEL_ID")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'Video title'])
+        st.table(df)
 
     if question_selected == "Which channels have the most number of videos, and how many videos do they have?":
-        pass
+        cur.execute("SELECT CHANNEL.CHANNEL_NAME , COUNT(VIDEO_ID) AS VIDEO_COUNT FROM VIDEO JOIN CHANNEL ON "
+                    "CHANNEL.CHANNEL_ID = VIDEO.CHANNEL_ID GROUP BY CHANNEL.CHANNEL_ID, VIDEO.CHANNEL_ID ORDER BY "
+                    "VIDEO_COUNT DESC LIMIT 3")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'Number of videos'])
+        st.table(df)
 
     if question_selected == "What are the top 10 most viewed videos and their respective channels?":
-        pass
+        cur.execute("SELECT CHANNEL.CHANNEL_NAME, VIDEO.VIEW_COUNT FROM CHANNEL JOIN VIDEO ON VIDEO.CHANNEL_ID = "
+                    "CHANNEL.CHANNEL_ID ORDER BY VIEW_COUNT DESC LIMIT 10")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'Top view count'])
+        st.table(df)
 
     if question_selected == "How many comments were made on each video, and what are their corresponding video names?":
-        pass
+        cur.execute("SELECT VIDEO.VIDEO_TITLE, COUNT(COMMENT_ID) AS TOTAL_COMMENT FROM COMMENTS JOIN VIDEO ON "
+                    "VIDEO.VIDEO_ID = COMMENTS.VIDEO_ID GROUP BY VIDEO_TITLE ORDER BY TOTAL_COMMENT DESC")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Video Title', 'Comments count'])
+        st.table(df)
 
     if question_selected == "Which videos have the highest number of likes, and what are their corresponding channel " \
                             "names?":
-        pass
+        cur.execute("SELECT CHANNEL.CHANNEL_NAME, VIDEO.VIDEO_TITLE, VIDEO.LIKE_COUNT FROM VIDEO JOIN CHANNEL ON "
+                    "VIDEO.CHANNEL_ID = CHANNEL.CHANNEL_ID ORDER BY VIDEO.LIKE_COUNT DESC LIMIT 10")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'Video Title', 'Like Count'])
+        st.table(df)
 
     if question_selected == "What is the total number of likes and dislikes for each video, and what are their " \
                             "corresponding video names?":
-        pass
+        cur.execute("SELECT VIDEO_TITLE, LIKE_COUNT, DISLIKE_COUNT FROM VIDEO")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Video Title', 'Like Count', 'Dislike Count'])
+        st.table(df)
 
     if question_selected == "What is the total number of views for each channel, and what are their corresponding " \
                             "channel names?":
-        pass
+        cur.execute("SELECT CHANNEL_NAME, CHANNEL_VIEW_COUNT FROM CHANNEL ORDER BY CHANNEL_VIEW_COUNT DESC")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'View Count'])
+        st.table(df)
 
     if question_selected == "What are the names of all the channels that have published videos in the year 2022?":
-        pass
+        cur.execute("SELECT CHANNEL_NAME FROM CHANNEL JOIN VIDEO ON CHANNEL.CHANNEL_ID = VIDEO.CHANNEL_ID WHERE "
+                    "EXTRACT(YEAR FROM VIDEO.PUBLISHED_AT) = 2022 GROUP BY CHANNEL.CHANNEL_NAME")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channels published video in the year 2022'])
+        st.table(df)
 
     if question_selected == "What is the average duration of all videos in each channel, and what are their " \
                             "corresponding channel names?":
-        pass
+        cur.execute("SELECT CHANNEL.CHANNEL_NAME, AVG(VIDEO.VIDEO_DURATION)::INT AS AVERAGE_DURATION FROM VIDEO JOIN "
+                    "CHANNEL ON CHANNEL.CHANNEL_ID = VIDEO.CHANNEL_ID GROUP BY CHANNEL.CHANNEL_ID")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'Average video duration in Seconds'])
+        st.table(df)
 
     if question_selected == "Which videos have the highest number of comments, and what are their corresponding " \
                             "channel names?":
-        pass
+        cur.execute("SELECT CHANNEL.CHANNEL_NAME, VIDEO.VIDEO_TITLE, VIDEO.COMMENT_COUNT FROM VIDEO JOIN CHANNEL ON "
+                    "CHANNEL.CHANNEL_ID = VIDEO.CHANNEL_ID ORDER BY VIDEO.COMMENT_COUNT DESC LIMIT 10")
+        fetch = cur.fetchall()
+        df = pd.DataFrame(fetch, columns=['Channel Name', 'Video Title', 'Comment count'])
+        st.table(df)
+        
